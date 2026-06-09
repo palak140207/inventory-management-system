@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "https://inventory-management-system-jfxq.onrender.com/",
+  baseURL: "https://inventory-management-system-jfxq.onrender.com/api",
 });
 
 // Add a request interceptor to attach token
