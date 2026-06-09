@@ -35,7 +35,6 @@ export const AuthProvider = ({ children }) => {
         _id: res.data._id,
         name: res.data.name,
         email: res.data.email,
-        role: res.data.role,
       });
       return { success: true };
     } catch (error) {
@@ -47,20 +46,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Register User
-  const register = async (name, email, password, role = "staff") => {
+  const register = async (name, email, password, confirmPassword) => {
     try {
       const res = await api.post("/auth/register", {
         name,
         email,
         password,
-        role,
+        confirmPassword,
       });
       localStorage.setItem("token", res.data.token);
       setUser({
         _id: res.data._id,
         name: res.data.name,
         email: res.data.email,
-        role: res.data.role,
       });
       return { success: true };
     } catch (error) {

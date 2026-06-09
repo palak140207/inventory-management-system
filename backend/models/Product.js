@@ -10,7 +10,6 @@ const productSchema = new mongoose.Schema(
     sku: {
       type: String,
       required: [true, "SKU is required"],
-      unique: true,
       uppercase: true,
       trim: true,
     },
@@ -39,11 +38,19 @@ const productSchema = new mongoose.Schema(
       default: 10,
       min: [0, "Threshold cannot be negative"],
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "User is required"],
+    },
   },
   {
     timestamps: true,
   }
 );
+
+// Compound unique index for user-specific SKU uniqueness
+productSchema.index({ sku: 1, createdBy: 1 }, { unique: true });
 
 // Auto-generate SKU before validation if not provided
 productSchema.pre("validate", function () {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/common/ProtectedRoute";
@@ -15,6 +16,8 @@ import Transactions from "./pages/Transactions";
 // Shell Layout Wrapper
 const DashboardLayout = () => {
   const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Get Page Title from Pathname
   const getPageTitle = (path) => {
@@ -33,11 +36,22 @@ const DashboardLayout = () => {
   };
 
   return (
-    <div className="flex bg-slate-950 min-h-screen text-slate-100 font-sans">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Navbar title={getPageTitle(location.pathname)} />
-        <main className="p-8 flex-1 overflow-auto">
+    <div className="flex bg-slate-955 min-h-screen text-slate-100 font-sans overflow-hidden">
+      {/* Sidebar Navigation */}
+      <Sidebar
+        isOpen={sidebarOpen}
+        setIsOpen={setSidebarOpen}
+        isCollapsed={sidebarCollapsed}
+        setIsCollapsed={setSidebarCollapsed}
+      />
+      
+      {/* Main Content Layout */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        <Navbar
+          title={getPageTitle(location.pathname)}
+          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        />
+        <main className="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto bg-slate-950/40">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/products" element={<Products />} />

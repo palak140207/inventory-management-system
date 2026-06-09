@@ -8,7 +8,7 @@ const getProducts = async (req, res, next) => {
   try {
     const { search, category, stockStatus, sort, page = 1, limit = 10 } = req.query;
 
-    const query = {};
+    const query = { createdBy: req.user._id };
 
     // 1. Search Filter (matches name or SKU)
     if (search) {
@@ -73,6 +73,13 @@ const getProductById = async (req, res, next) => {
       res.status(404);
       throw new Error("Product not found");
     }
+
+    // Verify ownership
+    if (product.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this product");
+    }
+
     res.json(product);
   } catch (error) {
     next(error);
@@ -91,16 +98,16 @@ const createProduct = async (req, res, next) => {
       throw new Error("Please fill in all required fields (name, category, price)");
     }
 
-    // Verify category exists
-    const categoryExists = await Category.findById(category);
+    // Verify category exists and belongs to user
+    const categoryExists = await Category.findOne({ _id: category, createdBy: req.user._id });
     if (!categoryExists) {
       res.status(400);
       throw new Error("Invalid category specified");
     }
 
-    // Check if user specified SKU and it already exists
+    // Check if SKU exists for this user
     if (sku) {
-      const skuExists = await Product.findOne({ sku: sku.trim().toUpperCase() });
+      const skuExists = await Product.findOne({ sku: sku.trim().toUpperCase(), createdBy: req.user._id });
       if (skuExists) {
         res.status(400);
         throw new Error("Product with this SKU already exists");
@@ -115,6 +122,7 @@ const createProduct = async (req, res, next) => {
       price: Number(price),
       quantity: quantity !== undefined ? Number(quantity) : 0,
       threshold: threshold !== undefined ? Number(threshold) : 10,
+      createdBy: req.user._id,
     });
 
     const populatedProduct = await Product.findById(product._id).populate("category", "name");
@@ -138,9 +146,15 @@ const updateProduct = async (req, res, next) => {
       throw new Error("Product not found");
     }
 
-    // If changing category, verify category exists
+    // Verify ownership
+    if (product.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this product");
+    }
+
+    // If changing category, verify category exists and belongs to user
     if (category) {
-      const categoryExists = await Category.findById(category);
+      const categoryExists = await Category.findOne({ _id: category, createdBy: req.user._id });
       if (!categoryExists) {
         res.status(400);
         throw new Error("Invalid category specified");
@@ -148,10 +162,11 @@ const updateProduct = async (req, res, next) => {
       product.category = category;
     }
 
-    // If updating SKU, check uniqueness
+    // If updating SKU, check uniqueness under this user
     if (sku) {
       const skuExists = await Product.findOne({
         sku: sku.trim().toUpperCase(),
+        createdBy: req.user._id,
         _id: { $ne: productId },
       });
       if (skuExists) {
@@ -184,6 +199,12 @@ const deleteProduct = async (req, res, next) => {
     if (!product) {
       res.status(404);
       throw new Error("Product not found");
+    }
+
+    // Verify ownership
+    if (product.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this product");
     }
 
     await Product.findByIdAndDelete(req.params.id);

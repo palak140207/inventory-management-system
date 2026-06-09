@@ -25,6 +25,12 @@ const stockIn = async (req, res, next) => {
       throw new Error("Product not found");
     }
 
+    // Verify ownership
+    if (product.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this product");
+    }
+
     // Increment product stock
     product.quantity += qtyNum;
     await product.save();
@@ -35,6 +41,7 @@ const stockIn = async (req, res, next) => {
       type: "IN",
       quantity: qtyNum,
       user: req.user._id,
+      createdBy: req.user._id,
       reason: reason || "Restock",
     });
 
@@ -76,6 +83,12 @@ const stockOut = async (req, res, next) => {
       throw new Error("Product not found");
     }
 
+    // Verify ownership
+    if (product.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this product");
+    }
+
     // Check stock availability
     if (product.quantity < qtyNum) {
       res.status(400);
@@ -94,6 +107,7 @@ const stockOut = async (req, res, next) => {
       type: "OUT",
       quantity: qtyNum,
       user: req.user._id,
+      createdBy: req.user._id,
       reason: reason || "Dispatch",
     });
 
@@ -116,7 +130,7 @@ const stockOut = async (req, res, next) => {
 // @access  Private
 const getTransactions = async (req, res, next) => {
   try {
-    const transactions = await Transaction.find()
+    const transactions = await Transaction.find({ createdBy: req.user._id })
       .populate("product", "name sku price")
       .populate("user", "name email")
       .sort({ createdAt: -1 });

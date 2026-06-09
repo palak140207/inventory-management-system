@@ -8,11 +8,14 @@ const Transaction = require("../models/Transaction");
 const getDashboardStats = async (req, res, next) => {
   try {
     // 1. Total counts
-    const totalProducts = await Product.countDocuments();
-    const totalCategories = await Category.countDocuments();
+    const totalProducts = await Product.countDocuments({ createdBy: req.user._id });
+    const totalCategories = await Category.countDocuments({ createdBy: req.user._id });
 
     // 2. Total stock valuation using aggregation
     const valuationResult = await Product.aggregate([
+      {
+        $match: { createdBy: req.user._id },
+      },
       {
         $group: {
           _id: null,
@@ -29,17 +32,19 @@ const getDashboardStats = async (req, res, next) => {
 
     // 3. Low stock alerts (where quantity <= threshold)
     const lowStockAlerts = await Product.find({
+      createdBy: req.user._id,
       $expr: { $lte: ["$quantity", "$threshold"] },
     })
       .populate("category", "name")
       .limit(10); // limit to top 10 for widget
 
     const lowStockCount = await Product.countDocuments({
+      createdBy: req.user._id,
       $expr: { $lte: ["$quantity", "$threshold"] },
     });
 
     // 4. Recent transactions
-    const recentTransactions = await Transaction.find()
+    const recentTransactions = await Transaction.find({ createdBy: req.user._id })
       .populate("product", "name sku")
       .populate("user", "name")
       .sort({ createdAt: -1 })
@@ -47,6 +52,9 @@ const getDashboardStats = async (req, res, next) => {
 
     // 5. Category-wise product distribution (for frontend charts)
     const categoryDistribution = await Product.aggregate([
+      {
+        $match: { createdBy: req.user._id },
+      },
       {
         $group: {
           _id: "$category",

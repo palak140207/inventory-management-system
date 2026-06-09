@@ -22,6 +22,11 @@ const transactionSchema = new mongoose.Schema(
       ref: "User",
       required: [true, "User is required"],
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "User is required"],
+    },
     reason: {
       type: String,
       trim: true,

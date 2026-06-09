@@ -12,11 +12,16 @@ const generateToken = (id) => {
 // @access  Public
 const registerUser = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, confirmPassword } = req.body;
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !confirmPassword) {
       res.status(400);
       throw new Error("Please fill in all required fields");
+    }
+
+    if (password !== confirmPassword) {
+      res.status(400);
+      throw new Error("Passwords do not match");
     }
 
     // Check if user exists
@@ -31,7 +36,6 @@ const registerUser = async (req, res, next) => {
       name,
       email,
       password,
-      role: role || "staff",
     });
 
     if (user) {
@@ -39,7 +43,6 @@ const registerUser = async (req, res, next) => {
         _id: user._id,
         name: user.name,
         email: user.email,
-        role: user.role,
         token: generateToken(user._id),
       });
     } else {
@@ -81,7 +84,6 @@ const loginUser = async (req, res, next) => {
       _id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role,
       token: generateToken(user._id),
     });
   } catch (error) {

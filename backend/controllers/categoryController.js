@@ -6,7 +6,7 @@ const Product = require("../models/Product");
 // @access  Private
 const getCategories = async (req, res, next) => {
   try {
-    const categories = await Category.find().sort({ name: 1 });
+    const categories = await Category.find({ createdBy: req.user._id }).sort({ name: 1 });
     res.json(categories);
   } catch (error) {
     next(error);
@@ -25,8 +25,8 @@ const createCategory = async (req, res, next) => {
       throw new Error("Category name is required");
     }
 
-    // Check if category name exists
-    const categoryExists = await Category.findOne({ name: name.trim() });
+    // Check if category name exists for this user
+    const categoryExists = await Category.findOne({ name: name.trim(), createdBy: req.user._id });
     if (categoryExists) {
       res.status(400);
       throw new Error("Category already exists");
@@ -35,6 +35,7 @@ const createCategory = async (req, res, next) => {
     const category = await Category.create({
       name: name.trim(),
       description: description ? description.trim() : "",
+      createdBy: req.user._id,
     });
 
     res.status(201).json(category);
@@ -57,9 +58,16 @@ const updateCategory = async (req, res, next) => {
       throw new Error("Category not found");
     }
 
+    // Verify ownership
+    if (category.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this category");
+    }
+
     if (name) {
       const categoryExists = await Category.findOne({
         name: name.trim(),
+        createdBy: req.user._id,
         _id: { $ne: categoryId },
       });
       if (categoryExists) {
@@ -93,8 +101,14 @@ const deleteCategory = async (req, res, next) => {
       throw new Error("Category not found");
     }
 
-    // Safety check: check if any products belong to this category
-    const productsCount = await Product.countDocuments({ category: categoryId });
+    // Verify ownership
+    if (category.createdBy.toString() !== req.user._id.toString()) {
+      res.status(403);
+      throw new Error("Not authorized to access this category");
+    }
+
+    // Safety check: check if any products belong to this category under this user
+    const productsCount = await Product.countDocuments({ category: categoryId, createdBy: req.user._id });
     if (productsCount > 0) {
       res.status(400);
       throw new Error(
