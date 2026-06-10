@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../services/api";
 import { formatINR } from "../utils/formatCurrency";
+import { useToast } from "../context/ToastContext";
 import {
   Search,
   Plus,
@@ -11,15 +13,13 @@ import {
   PlusCircle,
   MinusCircle,
   X,
-  SlidersHorizontal,
 } from "lucide-react";
 
 const Products = () => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const { showToast } = useToast();
 
   // Search & Filter parameters
   const [search, setSearch] = useState("");
@@ -34,6 +34,7 @@ const Products = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
+  const [showInlineCategoryForm, setShowInlineCategoryForm] = useState(false);
 
   // Form fields for Add/Edit
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -49,6 +50,16 @@ const Products = () => {
   const [adjustType, setAdjustType] = useState("IN"); // IN or OUT
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
+
+  // Form fields for Inline Add Category
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatDesc, setNewCatDesc] = useState("");
+
+  // Refs for auto-focusing
+  const addNameInputRef = useRef(null);
+  const editNameInputRef = useRef(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const fetchProducts = async () => {
     try {
@@ -68,7 +79,7 @@ const Products = () => {
       setTotal(res.data.total);
     } catch (err) {
       console.error(err);
-      setError("Failed to retrieve products");
+      showToast("Failed to retrieve products", "error");
     } finally {
       setLoading(false);
     }
@@ -92,11 +103,40 @@ const Products = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, categoryFilter, stockStatus, sort, page]);
 
+  // Handle URL Query Params for Quick Add
+  useEffect(() => {
+    const action = searchParams.get("action");
+    const catId = searchParams.get("category");
+
+    if (action === "add") {
+      resetForm();
+      if (catId) {
+        setCategory(catId);
+      }
+      setShowAddModal(true);
+      // Clear query params so reload doesn't re-trigger
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  // Auto-focus Name input on Modal Open
+  useEffect(() => {
+    if (showAddModal) {
+      const timer = setTimeout(() => addNameInputRef.current?.focus(), 80);
+      return () => clearTimeout(timer);
+    }
+  }, [showAddModal]);
+
+  useEffect(() => {
+    if (showEditModal) {
+      const timer = setTimeout(() => editNameInputRef.current?.focus(), 80);
+      return () => clearTimeout(timer);
+    }
+  }, [showEditModal]);
+
   const handleAddProduct = async (e) => {
     e.preventDefault();
     try {
-      setError("");
-      setSuccess("");
       await api.post("/products", {
         name,
         sku: sku || undefined,
@@ -107,11 +147,11 @@ const Products = () => {
         threshold: threshold || 10,
       });
       setShowAddModal(false);
-      setSuccess("Product added successfully!");
+      showToast("Product added successfully!", "success");
       resetForm();
       fetchProducts();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to create product");
+      showToast(err.response?.data?.message || "Failed to create product", "error");
     }
   };
 
@@ -130,8 +170,6 @@ const Products = () => {
   const handleEditProduct = async (e) => {
     e.preventDefault();
     try {
-      setError("");
-      setSuccess("");
       await api.put(`/products/${selectedProduct._id}`, {
         name,
         sku,
@@ -142,11 +180,11 @@ const Products = () => {
         threshold,
       });
       setShowEditModal(false);
-      setSuccess("Product updated successfully!");
+      showToast("Product updated successfully!", "success");
       resetForm();
       fetchProducts();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to update product");
+      showToast(err.response?.data?.message || "Failed to update product", "error");
     }
   };
 
@@ -154,13 +192,11 @@ const Products = () => {
     if (!window.confirm("Are you sure you want to delete this product?")) return;
 
     try {
-      setError("");
-      setSuccess("");
       await api.delete(`/products/${id}`);
-      setSuccess("Product deleted successfully!");
+      showToast("Product deleted successfully!", "success");
       fetchProducts();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to delete product");
+      showToast(err.response?.data?.message || "Failed to delete product", "error");
     }
   };
 
@@ -175,8 +211,6 @@ const Products = () => {
   const handleAdjustStock = async (e) => {
     e.preventDefault();
     try {
-      setError("");
-      setSuccess("");
       const endpoint = adjustType === "IN" ? "/transactions/stock-in" : "/transactions/stock-out";
       await api.post(endpoint, {
         productId: selectedProduct._id,
@@ -184,10 +218,42 @@ const Products = () => {
         reason: adjustReason,
       });
       setShowStockModal(false);
-      setSuccess(`Stock ${adjustType === "IN" ? "added" : "dispatched"} successfully!`);
+      showToast(`Stock ${adjustType === "IN" ? "added" : "dispatched"} successfully!`, "success");
       fetchProducts();
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to adjust stock level");
+      showToast(err.response?.data?.message || "Failed to adjust stock level", "error");
+    }
+  };
+
+  // Immediate row-level quick adjust by 1
+  const adjustStockOne = async (prod, type) => {
+    try {
+      const endpoint = type === "IN" ? "/transactions/stock-in" : "/transactions/stock-out";
+      await api.post(endpoint, {
+        productId: prod._id,
+        quantity: 1,
+        reason: type === "IN" ? "Quick adjustment (+1)" : "Quick adjustment (-1)",
+      });
+      showToast(`Stock ${type === "IN" ? "increased" : "decreased"} by 1!`, "success");
+      fetchProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Failed to adjust stock level", "error");
+    }
+  };
+
+  const handleInlineAddCategory = async (e) => {
+    e.preventDefault();
+    if (!newCatName) return;
+    try {
+      const res = await api.post("/categories", { name: newCatName, description: newCatDesc });
+      showToast("Category created successfully!", "success");
+      await fetchCategories();
+      setCategory(res.data._id);
+      setShowInlineCategoryForm(false);
+      setNewCatName("");
+      setNewCatDesc("");
+    } catch (err) {
+      showToast(err.response?.data?.message || "Failed to create category", "error");
     }
   };
 
@@ -200,22 +266,11 @@ const Products = () => {
     setQuantity("");
     setThreshold("");
     setSelectedProduct(null);
+    setShowInlineCategoryForm(false);
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Alert Banners */}
-      {error && (
-        <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm glow-rose">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-450 p-4 rounded-xl text-sm glow-emerald">
-          {success}
-        </div>
-      )}
-
       {/* Control panel header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-5 rounded-2xl shadow-xl">
         {/* Search */}
@@ -231,7 +286,7 @@ const Products = () => {
               setPage(1);
             }}
             placeholder="Search products by name or SKU..."
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
           />
         </div>
 
@@ -261,7 +316,7 @@ const Products = () => {
               setStockStatus(e.target.value);
               setPage(1);
             }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+            className="bg-slate-955 border border-slate-800 text-slate-300 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
           >
             <option value="">All Stock Levels</option>
             <option value="low">Low Stock Alerts</option>
@@ -274,7 +329,7 @@ const Products = () => {
               setSort(e.target.value);
               setPage(1);
             }}
-            className="bg-slate-950 border border-slate-800 text-slate-300 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+            className="bg-slate-955 border border-slate-800 text-slate-300 px-3 py-2.5 rounded-xl text-xs focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
           >
             <option value="">Sort: Newest</option>
             <option value="name_asc">Name: A-Z</option>
@@ -315,13 +370,13 @@ const Products = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-950/40">
+                  <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-955/40">
                     <th className="p-4">Product Details</th>
                     <th className="p-4">SKU</th>
                     <th className="p-4">Category</th>
                     <th className="p-4 text-right">Price</th>
-                    <th className="p-4 text-right">Stock</th>
-                    <th className="p-4 text-center">Quick Stock Adjust</th>
+                    <th className="p-4 text-center">Stock Level (Adjust +/- 1)</th>
+                    <th className="p-4 text-center">Detailed Stock Adjust</th>
                     <th className="p-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -345,31 +400,47 @@ const Products = () => {
                         <td className="p-4 text-right font-medium text-slate-200">
                           {formatINR(prod.price)}
                         </td>
-                        <td className="p-4 text-right">
-                          <div className="flex flex-col items-end">
-                            <span className={`font-bold text-sm ${isLowStock ? "text-rose-400" : "text-slate-100"}`}>
-                              {prod.quantity}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-medium">min: {prod.threshold}</span>
+                        <td className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              onClick={() => adjustStockOne(prod, "OUT")}
+                              className="w-7 h-7 flex items-center justify-center bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-rose-400 rounded-lg text-sm font-semibold transition-all cursor-pointer shadow"
+                              title="Decrease Stock by 1"
+                            >
+                              -
+                            </button>
+                            <div className="flex flex-col items-center min-w-[42px]">
+                              <span className={`font-bold text-sm ${isLowStock ? "text-rose-455" : "text-slate-100"}`}>
+                                {prod.quantity}
+                              </span>
+                              <span className="text-[9px] text-slate-500 font-medium leading-none mt-0.5">min: {prod.threshold}</span>
+                            </div>
+                            <button
+                              onClick={() => adjustStockOne(prod, "IN")}
+                              className="w-7 h-7 flex items-center justify-center bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg text-sm font-semibold transition-all cursor-pointer shadow"
+                              title="Increase Stock by 1"
+                            >
+                              +
+                            </button>
                           </div>
                         </td>
                         <td className="p-4">
                           <div className="flex justify-center gap-3">
                             <button
                               onClick={() => handleOpenStock(prod, "IN")}
-                              className="flex items-center gap-1.5 text-emerald-455 hover:bg-emerald-500/10 px-3 py-1 border border-emerald-500/20 hover:border-emerald-500/40 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                              title="Restock / Increase quantity"
+                              className="flex items-center gap-1.5 text-emerald-450 hover:bg-emerald-500/10 px-3 py-1 border border-emerald-500/20 hover:border-emerald-500/40 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                              title="Detailed Stock In"
                             >
                               <PlusCircle size={14} />
-                              Stock In
+                              In
                             </button>
                             <button
                               onClick={() => handleOpenStock(prod, "OUT")}
-                              className="flex items-center gap-1.5 text-rose-455 hover:bg-rose-500/10 px-3 py-1 border border-rose-500/20 hover:border-rose-500/40 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                              title="Dispatch / Decrease quantity"
+                              className="flex items-center gap-1.5 text-rose-450 hover:bg-rose-500/10 px-3 py-1 border border-rose-500/20 hover:border-rose-500/40 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                              title="Detailed Stock Out"
                             >
                               <MinusCircle size={14} />
-                              Stock Out
+                              Out
                             </button>
                           </div>
                         </td>
@@ -430,11 +501,25 @@ const Products = () => {
                       <span className="font-bold text-slate-200">{formatINR(prod.price)}</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-[10px] text-slate-500 block">Stock Level</span>
-                      <span className={`font-bold ${isLowStock ? "text-rose-400" : "text-slate-200"}`}>
-                        {prod.quantity}{" "}
-                        <span className="text-[9px] text-slate-500 font-normal">(min: {prod.threshold})</span>
-                      </span>
+                      <span className="text-[10px] text-slate-500 block mb-1">Stock Level</span>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => adjustStockOne(prod, "OUT")}
+                          className="w-6 h-6 flex items-center justify-center text-slate-450 hover:text-rose-450 bg-slate-950 border border-slate-800 rounded-lg text-xs cursor-pointer font-bold"
+                        >
+                          -
+                        </button>
+                        <span className={`font-bold text-sm min-w-[20px] text-center ${isLowStock ? "text-rose-450" : "text-slate-200"}`}>
+                          {prod.quantity}
+                        </span>
+                        <button
+                          onClick={() => adjustStockOne(prod, "IN")}
+                          className="w-6 h-6 flex items-center justify-center text-slate-450 hover:text-emerald-450 bg-slate-950 border border-slate-800 rounded-lg text-xs cursor-pointer font-bold"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span className="text-[9px] text-slate-500 block mt-0.5">(min: {prod.threshold})</span>
                     </div>
                   </div>
 
@@ -444,7 +529,7 @@ const Products = () => {
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleOpenStock(prod, "IN")}
-                        className="flex items-center gap-1 text-[11px] font-bold text-emerald-455 hover:bg-emerald-500/10 px-2 py-1.5 border border-emerald-500/20 rounded-lg transition-all cursor-pointer"
+                        className="flex items-center gap-1 text-[11px] font-bold text-emerald-450 hover:bg-emerald-500/10 px-2 py-1.5 border border-emerald-500/20 rounded-lg transition-all cursor-pointer"
                         title="Stock In"
                       >
                         <PlusCircle size={13} />
@@ -452,7 +537,7 @@ const Products = () => {
                       </button>
                       <button
                         onClick={() => handleOpenStock(prod, "OUT")}
-                        className="flex items-center gap-1 text-[11px] font-bold text-rose-455 hover:bg-rose-500/10 px-2 py-1.5 border border-rose-500/20 rounded-lg transition-all cursor-pointer"
+                        className="flex items-center gap-1 text-[11px] font-bold text-rose-450 hover:bg-rose-500/10 px-2 py-1.5 border border-rose-500/20 rounded-lg transition-all cursor-pointer"
                         title="Stock Out"
                       >
                         <MinusCircle size={13} />
@@ -464,13 +549,13 @@ const Products = () => {
                     <div className="flex gap-1.5">
                       <button
                         onClick={() => handleOpenEdit(prod)}
-                        className="p-1.5 border border-slate-800 bg-slate-950 text-slate-400 hover:text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 border border-slate-800 bg-slate-955 text-slate-400 hover:text-indigo-400 rounded-lg transition-colors cursor-pointer"
                       >
                         <Edit2 size={13} />
                       </button>
                       <button
                         onClick={() => handleDeleteProduct(prod._id)}
-                        className="p-1.5 border border-slate-800 bg-slate-950 text-slate-400 hover:text-rose-450 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 border border-slate-800 bg-slate-955 text-slate-400 hover:text-rose-455 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -491,17 +576,17 @@ const Products = () => {
                 <button
                   disabled={page === 1}
                   onClick={() => setPage(page - 1)}
-                  className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 disabled:opacity-30 disabled:pointer-events-none hover:text-slate-200 transition-all cursor-pointer"
+                  className="p-2 bg-slate-955 border border-slate-800 rounded-xl text-slate-400 disabled:opacity-30 disabled:pointer-events-none hover:text-slate-200 transition-all cursor-pointer"
                 >
                   <ChevronLeft size={14} />
                 </button>
-                <span className="text-slate-300 font-semibold px-2 bg-slate-950 border border-slate-850 py-1.5 px-3 rounded-lg">
+                <span className="text-slate-300 font-semibold px-2 bg-slate-955 border border-slate-850 py-1.5 px-3 rounded-lg">
                   {page} / {pages}
                 </span>
                 <button
                   disabled={page === pages}
                   onClick={() => setPage(page + 1)}
-                  className="p-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 disabled:opacity-30 disabled:pointer-events-none hover:text-slate-200 transition-all cursor-pointer"
+                  className="p-2 bg-slate-955 border border-slate-800 rounded-xl text-slate-400 disabled:opacity-30 disabled:pointer-events-none hover:text-slate-200 transition-all cursor-pointer"
                 >
                   <ChevronRight size={14} />
                 </button>
@@ -513,13 +598,13 @@ const Products = () => {
 
       {/* --- ADD PRODUCT MODAL --- */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl animate-slide-up">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/20">
               <h3 className="font-bold text-slate-100 text-base">Add New Product</h3>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors"
+                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -529,12 +614,13 @@ const Products = () => {
                 <div className="col-span-2">
                   <label className="block text-slate-300 text-xs font-semibold mb-1.5">Product Name *</label>
                   <input
+                    ref={addNameInputRef}
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="E.g. Wireless Mouse"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
@@ -544,16 +630,25 @@ const Products = () => {
                     value={sku}
                     onChange={(e) => setSku(e.target.value)}
                     placeholder="E.g. MS-WRLSS-01"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 text-xs font-semibold mb-1.5">Category *</label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-slate-300 text-xs font-semibold">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineCategoryForm(!showInlineCategoryForm)}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer transition-colors"
+                    >
+                      {showInlineCategoryForm ? "Cancel Add" : "+ Add Category"}
+                    </button>
+                  </div>
                   <select
                     required
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
                   >
                     <option value="">Select Category</option>
                     {categories.map((cat) => (
@@ -562,6 +657,38 @@ const Products = () => {
                       </option>
                     ))}
                   </select>
+
+                  {/* Expandable Inline Category Form */}
+                  {showInlineCategoryForm && (
+                    <div className="mt-3 p-3 bg-slate-950/60 border border-slate-850 rounded-xl space-y-3 animate-slide-up">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">New Category Details</p>
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Category Name (e.g. Cables) *"
+                          value={newCatName}
+                          onChange={(e) => setNewCatName(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-105 placeholder-slate-600 text-xs focus:outline-none focus:border-indigo-500 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <textarea
+                          placeholder="Description (optional)"
+                          value={newCatDesc}
+                          onChange={(e) => setNewCatDesc(e.target.value)}
+                          rows="2"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-105 placeholder-slate-600 text-xs focus:outline-none focus:border-indigo-500 resize-none transition-all"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleInlineAddCategory}
+                        className="w-full py-2 bg-indigo-650 hover:bg-indigo-600 text-white font-semibold rounded-lg text-xs transition-colors cursor-pointer"
+                      >
+                        Create & Select Category
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-slate-300 text-xs font-semibold mb-1.5">Price (₹) *</label>
@@ -572,7 +699,7 @@ const Products = () => {
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
                     placeholder="0.00"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
@@ -582,7 +709,7 @@ const Products = () => {
                     value={threshold}
                     onChange={(e) => setThreshold(e.target.value)}
                     placeholder="10"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div className="col-span-2">
@@ -592,7 +719,7 @@ const Products = () => {
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Product specification or notes..."
                     rows="3"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 resize-none transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 resize-none transition-all"
                   ></textarea>
                 </div>
               </div>
@@ -609,13 +736,13 @@ const Products = () => {
 
       {/* --- EDIT PRODUCT MODAL --- */}
       {showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl animate-slide-up">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/20">
               <h3 className="font-bold text-slate-100 text-base">Edit Product Details</h3>
               <button
                 onClick={() => setShowEditModal(false)}
-                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors"
+                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -625,11 +752,12 @@ const Products = () => {
                 <div className="col-span-2">
                   <label className="block text-slate-300 text-xs font-semibold mb-1.5">Product Name *</label>
                   <input
+                    ref={editNameInputRef}
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
@@ -639,16 +767,25 @@ const Products = () => {
                     required
                     value={sku}
                     onChange={(e) => setSku(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-300 text-xs font-semibold mb-1.5">Category *</label>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-slate-300 text-xs font-semibold">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowInlineCategoryForm(!showInlineCategoryForm)}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer transition-colors"
+                    >
+                      {showInlineCategoryForm ? "Cancel Add" : "+ Add Category"}
+                    </button>
+                  </div>
                   <select
                     required
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
                   >
                     {categories.map((cat) => (
                       <option key={cat._id} value={cat._id}>
@@ -656,6 +793,38 @@ const Products = () => {
                       </option>
                     ))}
                   </select>
+
+                  {/* Expandable Inline Category Form */}
+                  {showInlineCategoryForm && (
+                    <div className="mt-3 p-3 bg-slate-950/60 border border-slate-855 rounded-xl space-y-3 animate-slide-up">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">New Category Details</p>
+                      <div>
+                        <input
+                          type="text"
+                          placeholder="Category Name (e.g. Cables) *"
+                          value={newCatName}
+                          onChange={(e) => setNewCatName(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-105 placeholder-slate-600 text-xs focus:outline-none focus:border-indigo-500 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <textarea
+                          placeholder="Description (optional)"
+                          value={newCatDesc}
+                          onChange={(e) => setNewCatDesc(e.target.value)}
+                          rows="2"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-105 placeholder-slate-600 text-xs focus:outline-none focus:border-indigo-500 resize-none transition-all"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleInlineAddCategory}
+                        className="w-full py-2 bg-indigo-650 hover:bg-indigo-600 text-white font-semibold rounded-lg text-xs transition-colors cursor-pointer"
+                      >
+                        Create & Select Category
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-slate-300 text-xs font-semibold mb-1.5">Price (₹) *</label>
@@ -665,7 +834,7 @@ const Products = () => {
                     required
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div>
@@ -674,7 +843,7 @@ const Products = () => {
                     type="number"
                     value={threshold}
                     onChange={(e) => setThreshold(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                   />
                 </div>
                 <div className="col-span-2">
@@ -683,7 +852,7 @@ const Products = () => {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     rows="3"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 resize-none transition-all"
+                    className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-indigo-500 resize-none transition-all"
                   ></textarea>
                 </div>
               </div>
@@ -700,7 +869,7 @@ const Products = () => {
 
       {/* --- STOCK ADJUSTMENT (IN/OUT) MODAL --- */}
       {showStockModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-955/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl animate-slide-up">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/20">
               <h3 className="font-bold text-slate-100 text-base">
@@ -708,7 +877,7 @@ const Products = () => {
               </h3>
               <button
                 onClick={() => setShowStockModal(false)}
-                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors"
+                className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-850 rounded-xl transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -719,7 +888,7 @@ const Products = () => {
                 <p className="text-[10px] font-mono text-slate-500 mt-0.5">{selectedProduct?.sku}</p>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-850 flex justify-between items-center text-xs">
+              <div className="p-4 rounded-xl bg-slate-955 border border-slate-850 flex justify-between items-center text-xs">
                 <div>
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Type</p>
                   <span className={`inline-block font-bold mt-1 ${
@@ -743,8 +912,22 @@ const Products = () => {
                   value={adjustQty}
                   onChange={(e) => setAdjustQty(e.target.value)}
                   placeholder="E.g. 15, 20"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                  className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                 />
+                
+                {/* Click-reducing preset buttons */}
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {[1, 5, 10, 25, 50, 100].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAdjustQty(preset.toString())}
+                      className="px-2.5 py-1.5 bg-slate-955 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow"
+                    >
+                      {adjustType === "IN" ? "+" : "-"}{preset}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -754,7 +937,7 @@ const Products = () => {
                   value={adjustReason}
                   onChange={(e) => setAdjustReason(e.target.value)}
                   placeholder="E.g. Weekly replenishment, Customer sale"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                  className="w-full px-3.5 py-2.5 bg-slate-955 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-655 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                 />
               </div>
 
